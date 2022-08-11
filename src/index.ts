@@ -1,20 +1,21 @@
 import { AxiosInstance, AxiosRequestConfig } from 'axios'
-import jwtDecode from 'jwt-decode'
 
-// a little time before expiration to try refresh (seconds)
-const EXPIRE_FUDGE = 10
-export const STORAGE_KEY = `auth-tokens-${process.env.NODE_ENV}`
+export const COOKIE_NAME = 'ember_simple_auth-session'
 
-type Token = string
+type TokenValue = string
 export interface IAuthTokens {
-  accessToken: Token
-  refreshToken: Token
+  accessToken: IAccessToken
+  refreshToken: TokenValue
+}
+
+interface IAccessToken {
+  value: TokenValue
+  exp: number
 }
 
 // EXPORTS
 
 /**
- * Checks if refresh tokens are stored
  * @returns Whether the user is logged in or not
  */
 export const isLoggedIn = (): boolean => {
@@ -26,43 +27,44 @@ export const isLoggedIn = (): boolean => {
  * Sets the access and refresh tokens
  * @param {IAuthTokens} tokens - Access and Refresh tokens
  */
-export const setAuthTokens = (tokens: IAuthTokens): void => localStorage.setItem(STORAGE_KEY, JSON.stringify(tokens))
+export const setAuthTokens = (tokens: IAuthTokens): void => {
+  let cookies = decodeURIComponent(document.cookie).split('; ')
+  const indexOfTargetCookie = cookies.findIndex((cookie) => cookie.includes(`${COOKIE_NAME}=`))
+
+  let targetCookie = JSON.parse(cookies[indexOfTargetCookie].replace(`${COOKIE_NAME}=`, ''))
+  targetCookie.authenticated.token = tokens.accessToken.value
+  targetCookie.authenticated.refresh_token = tokens.refreshToken
+  const stringifiedTargetCookie = `${COOKIE_NAME}=`.concat(JSON.stringify(targetCookie))
+  cookies[indexOfTargetCookie] = stringifiedTargetCookie
+  const replacementCookie = cookies.join('; ')
+  document.cookie = encodeURIComponent(replacementCookie)
+}
 
 /**
  * Sets the access token
  * @param {string} token - Access token
  */
-export const setAccessToken = (token: Token): void => {
+export const setAccessToken = (token: TokenValue): void => {
   const tokens = getAuthTokens()
   if (!tokens) {
     throw new Error('Unable to update access token since there are not tokens currently stored')
   }
 
-  tokens.accessToken = token
+  tokens.accessToken.value = token
   setAuthTokens(tokens)
 }
 
 /**
  * Clears both tokens
  */
-export const clearAuthTokens = (): void => localStorage.removeItem(STORAGE_KEY)
+export const clearAuthTokens = (): void => localStorage.removeItem(COOKIE_NAME)
 
 /**
- * Returns the stored refresh token
  * @returns {string} Refresh token
  */
-export const getRefreshToken = (): Token | undefined => {
+export const getRefreshToken = (): TokenValue | undefined => {
   const tokens = getAuthTokens()
   return tokens ? tokens.refreshToken : undefined
-}
-
-/**
- * Returns the stored access token
- * @returns {string} Access token
- */
-export const getAccessToken = (): Token | undefined => {
-  const tokens = getAuthTokens()
-  return tokens ? tokens.accessToken : undefined
 }
 
 /**
@@ -72,26 +74,30 @@ export const getAccessToken = (): Token | undefined => {
  */
 
 /**
- * Gets the current access token, exchanges it with a new one if it's expired and then returns the token.
- * @param {requestRefresh} requestRefresh - Function that is used to get a new access token
- * @returns {string} Access token
+ * @param {number} expiration - Expiration time of token
+ * @returns {boolean} If expiration time has passed or will soon pass
  */
-export const refreshTokenIfNeeded = async (requestRefresh: TokenRefreshRequest): Promise<Token | undefined> => {
-  // use access token (if we have it)
-  let accessToken = getAccessToken()
-
-  // check if access token is expired
-  if (!accessToken || isTokenExpired(accessToken)) {
-    // do refresh
-
-    accessToken = await refreshToken(requestRefresh)
-  }
-
-  return accessToken
+const hasExpiredOrIsAboutToExpire = (expiration: number): boolean => {
+  const timeRemaining = expiration - Date.now() / 1000
+  const aboutToExpire = timeRemaining <= 10
+  return !timeRemaining || aboutToExpire
 }
 
 /**
- *
+ * @param {requestRefresh} requestRefresh - Function that is used to get a new access token
+ * @returns {string} new access token
+ */
+export const refreshTokenIfNeeded = async (requestRefresh: TokenRefreshRequest): Promise<TokenValue | undefined> => {
+  const accessToken = getAuthTokens()?.accessToken
+  const expiration = accessToken?.exp
+  let accessTokenValue = accessToken?.value
+  if (expiration ? hasExpiredOrIsAboutToExpire(expiration) : true) {
+    accessTokenValue = await refreshToken(requestRefresh)
+  }
+  return accessTokenValue
+}
+
+/**
  * @param {Axios} axios - Axios instance to apply the interceptor to
  * @param {IAuthTokenInterceptorConfig} config - Configuration for the interceptor
  */
@@ -100,77 +106,41 @@ export const applyAuthTokenInterceptor = (axios: AxiosInstance, config: IAuthTok
   axios.interceptors.request.use(authTokenInterceptor(config))
 }
 
-/**
- * @deprecated This method has been renamed to applyAuthTokenInterceptor and will be removed in a future release.
- */
-export const useAuthTokenInterceptor = applyAuthTokenInterceptor
-
 // PRIVATE
 
 /**
- *  Returns the refresh and access tokens
- * @returns {IAuthTokens} Object containing refresh and access tokens
+ * @returns {IAuthTokens} Object containing refresh token and access token
  */
 const getAuthTokens = (): IAuthTokens | undefined => {
-  const rawTokens = localStorage.getItem(STORAGE_KEY)
-  if (!rawTokens) return
+  const cookie = document.cookie.split(`; ${COOKIE_NAME}=`)
+  const encodedValue = cookie.pop()?.split(';').shift()
 
-  try {
-    // parse stored tokens JSON
-    return JSON.parse(rawTokens)
-  } catch (error: unknown) {
-    if (error instanceof SyntaxError) {
-      error.message = `Failed to parse auth tokens: ${rawTokens}`
-      throw error
+  let tokens = undefined
+  if (encodedValue) {
+    const decodedValue = decodeURIComponent(encodedValue)
+    try {
+      const parsedValue = JSON.parse(decodedValue)
+      const accessTokenValue = parsedValue.authenticated.value
+      const accessTokenExp = parsedValue.authenticated.tokenData.exp
+      const refreshToken = parsedValue.authenticated.refresh_token
+      tokens = { accessToken: { value: accessTokenValue, exp: accessTokenExp }, refreshToken }
+    } catch (error: unknown) {
+      if (error instanceof SyntaxError) {
+        error.message = `Failed to parse auth tokens: ${decodedValue}`
+        throw error
+      }
     }
   }
-}
 
-/**
- * Checks if the token is undefined, has expired or is about the expire
- *
- * @param {string} token - Access token
- * @returns Whether or not the token is undefined, has expired or is about the expire
- */
-const isTokenExpired = (token: Token): boolean => {
-  if (!token) return true
-  const expiresIn = getExpiresIn(token)
-  return !expiresIn || expiresIn <= EXPIRE_FUDGE
-}
-
-/**
- * Gets the unix timestamp from an access token
- *
- * @param {string} token - Access token
- * @returns {string} Unix timestamp
- */
-const getTimestampFromToken = (token: Token): number | undefined => {
-  const decoded = jwtDecode<{ [key: string]: number }>(token)
-
-  return decoded?.exp
-}
-
-/**
- * Returns the number of seconds before the access token expires or -1 if it already has
- *
- * @param {string} token - Access token
- * @returns {number} Number of seconds before the access token expires
- */
-const getExpiresIn = (token: Token): number => {
-  const expiration = getTimestampFromToken(token)
-
-  if (!expiration) return -1
-
-  return expiration - Date.now() / 1000
+  return tokens
 }
 
 /**
  * Refreshes the access token using the provided function
- *
  * @param {requestRefresh} requestRefresh - Function that is used to get a new access token
  * @returns {string} - Fresh access token
  */
-const refreshToken = async (requestRefresh: TokenRefreshRequest): Promise<Token> => {
+const refreshToken = async (requestRefresh: TokenRefreshRequest): Promise<TokenValue> => {
   const refreshToken = getRefreshToken()
   if (!refreshToken) throw new Error('No refresh token available')
 
@@ -181,7 +151,7 @@ const refreshToken = async (requestRefresh: TokenRefreshRequest): Promise<Token>
     const newTokens = await requestRefresh(refreshToken)
     if (typeof newTokens === 'object' && newTokens?.accessToken) {
       await setAuthTokens(newTokens)
-      return newTokens.accessToken
+      return newTokens.accessToken.value
     } else if (typeof newTokens === 'string') {
       await setAccessToken(newTokens)
       return newTokens
@@ -194,7 +164,7 @@ const refreshToken = async (requestRefresh: TokenRefreshRequest): Promise<Token>
     const status = error?.response?.status
     if (status === 401 || status === 422) {
       // The refresh token is invalid so remove the stored tokens
-      localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(COOKIE_NAME)
       throw new Error(`Got ${status} on token refresh; clearing both auth tokens`)
     } else {
       // A different error, probably network error
@@ -205,7 +175,7 @@ const refreshToken = async (requestRefresh: TokenRefreshRequest): Promise<Token>
   }
 }
 
-export type TokenRefreshRequest = (refreshToken: Token) => Promise<Token | IAuthTokens>
+export type TokenRefreshRequest = (refreshToken: TokenValue) => Promise<TokenValue | IAuthTokens>
 
 export interface IAuthTokenInterceptorConfig {
   header?: string
@@ -273,7 +243,7 @@ let queue: RequestsQueue = []
  * Function that resolves all items in the queue with the provided token
  * @param token New access token
  */
-const resolveQueue = (token?: Token) => {
+const resolveQueue = (token?: TokenValue) => {
   queue.forEach((p) => {
     p.resolve(token)
   })

@@ -22,10 +22,10 @@
     "jsonwebtoken": "^8.5.1",
     "prettier": "^2.2.1",
     "ts-jest": "^26.5.4",
-    "typescript": "^4.2.4"
+    "typescript": "^4.7.4"
   },
   "peerDependencies": {
-    "axios": "^0.27.0"
+    "axios": "^0.27.2"
   },
   "dependencies": {
     "jwt-decode": "^3.1.2"
