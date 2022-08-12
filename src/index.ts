@@ -1,14 +1,19 @@
 import { AxiosInstance, AxiosRequestConfig } from 'axios'
-import jwtDecode from 'jwt-decode'
+// import jwtDecode from 'jwt-decode'
 
 // a little time before expiration to try refresh (seconds)
 const EXPIRE_FUDGE = 10
-export const STORAGE_KEY = `auth-tokens-${process.env.NODE_ENV}`
+export const STORAGE_KEY = 'ember_simple_auth-session'
 
 type Token = string
 export interface IAuthTokens {
-  accessToken: Token
+  accessToken: IAccessToken
   refreshToken: Token
+}
+
+export interface IAccessToken {
+  value: Token
+  exp: string
 }
 
 // EXPORTS
@@ -38,7 +43,7 @@ export const setAccessToken = (token: Token): void => {
     throw new Error('Unable to update access token since there are not tokens currently stored')
   }
 
-  tokens.accessToken = token
+  tokens.accessToken.value = token
   setAuthTokens(tokens)
 }
 
@@ -62,7 +67,14 @@ export const getRefreshToken = (): Token | undefined => {
  */
 export const getAccessToken = (): Token | undefined => {
   const tokens = getAuthTokens()
-  return tokens ? tokens.accessToken : undefined
+  console.log('getAccessToken(): ', tokens)
+  return tokens ? tokens.accessToken.value : undefined
+}
+
+export const getAccessTokenExpiration = (): string | undefined => {
+  const tokens = getAuthTokens()
+  console.log('getAccessToken(): ', tokens)
+  return tokens ? tokens.accessToken.exp : undefined
 }
 
 /**
@@ -79,11 +91,12 @@ export const getAccessToken = (): Token | undefined => {
 export const refreshTokenIfNeeded = async (requestRefresh: TokenRefreshRequest): Promise<Token | undefined> => {
   // use access token (if we have it)
   let accessToken = getAccessToken()
+  let expiration = getAccessTokenExpiration()
+  console.log('Access Token retrieved: ', accessToken)
 
-  // check if access token is expired
-  if (!accessToken || isTokenExpired(accessToken)) {
-    // do refresh
-
+  let isExpired = isTokenExpired(Number(expiration))
+  console.log('isExpired: ', isExpired)
+  if (!accessToken || isExpired) {
     accessToken = await refreshToken(requestRefresh)
   }
 
@@ -112,18 +125,27 @@ export const useAuthTokenInterceptor = applyAuthTokenInterceptor
  * @returns {IAuthTokens} Object containing refresh and access tokens
  */
 const getAuthTokens = (): IAuthTokens | undefined => {
-  const rawTokens = localStorage.getItem(STORAGE_KEY)
-  if (!rawTokens) return
+  const cookie = document.cookie.split(`; ${STORAGE_KEY}=`)
+  const encodedValue = cookie.pop()?.split(';').shift()
 
-  try {
-    // parse stored tokens JSON
-    return JSON.parse(rawTokens)
-  } catch (error: unknown) {
-    if (error instanceof SyntaxError) {
-      error.message = `Failed to parse auth tokens: ${rawTokens}`
-      throw error
+  let tokens = undefined
+  if (encodedValue) {
+    const decodedValue = decodeURIComponent(encodedValue)
+    try {
+      const parsedValue = JSON.parse(decodedValue)
+      const accessTokenValue = parsedValue.authenticated.token
+      const accessTokenExp = parsedValue.authenticated.tokenData.exp
+      const refreshToken = parsedValue.authenticated.refresh_token
+      tokens = { accessToken: { value: accessTokenValue, exp: accessTokenExp }, refreshToken }
+    } catch (error: unknown) {
+      if (error instanceof SyntaxError) {
+        error.message = `Failed to parse auth tokens: ${decodedValue}`
+        throw error
+      }
     }
   }
+
+  return tokens
 }
 
 /**
@@ -132,22 +154,10 @@ const getAuthTokens = (): IAuthTokens | undefined => {
  * @param {string} token - Access token
  * @returns Whether or not the token is undefined, has expired or is about the expire
  */
-const isTokenExpired = (token: Token): boolean => {
-  if (!token) return true
-  const expiresIn = getExpiresIn(token)
+const isTokenExpired = (expiration: number): boolean => {
+  if (!expiration) return true
+  const expiresIn = getExpiresIn(expiration)
   return !expiresIn || expiresIn <= EXPIRE_FUDGE
-}
-
-/**
- * Gets the unix timestamp from an access token
- *
- * @param {string} token - Access token
- * @returns {string} Unix timestamp
- */
-const getTimestampFromToken = (token: Token): number | undefined => {
-  const decoded = jwtDecode<{ [key: string]: number }>(token)
-
-  return decoded?.exp
 }
 
 /**
@@ -156,12 +166,9 @@ const getTimestampFromToken = (token: Token): number | undefined => {
  * @param {string} token - Access token
  * @returns {number} Number of seconds before the access token expires
  */
-const getExpiresIn = (token: Token): number => {
-  const expiration = getTimestampFromToken(token)
-
+const getExpiresIn = (expiration: number): number => {
   if (!expiration) return -1
-
-  return expiration - Date.now() / 1000
+  return expiration - Date.now()
 }
 
 /**
@@ -179,6 +186,7 @@ const refreshToken = async (requestRefresh: TokenRefreshRequest): Promise<Token>
 
     // Refresh and store access token using the supplied refresh function
     const newTokens = await requestRefresh(refreshToken)
+    console.log('newTokens: ', newTokens)
     if (typeof newTokens === 'object' && newTokens?.accessToken) {
       await setAuthTokens(newTokens)
       return newTokens.accessToken
@@ -224,7 +232,7 @@ export interface IAuthTokenInterceptorConfig {
  */
 export const authTokenInterceptor = ({
   header = 'Authorization',
-  headerPrefix = 'Bearer ',
+  headerPrefix = '',
   requestRefresh,
 }: IAuthTokenInterceptorConfig) => async (requestConfig: AxiosRequestConfig): Promise<AxiosRequestConfig> => {
   // We need refresh token to do any authenticated requests
@@ -257,7 +265,7 @@ export const authTokenInterceptor = ({
   }
 
   // add token to headers
-  if (accessToken && requestConfig.headers) requestConfig.headers[header] = `${headerPrefix}${accessToken}`
+  if (accessToken && requestConfig.headers) requestConfig.headers[header] = accessToken
   return requestConfig
 }
 
