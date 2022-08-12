@@ -1,4 +1,5 @@
 import { AxiosInstance, AxiosRequestConfig } from 'axios'
+import { getCookie, setCookie } from 'typescript-cookie'
 
 export const COOKIE_NAME = 'ember_simple_auth-session'
 
@@ -28,16 +29,10 @@ export const isLoggedIn = (): boolean => {
  * @param {IAuthTokens} tokens - Access and Refresh tokens
  */
 export const setAuthTokens = (tokens: IAuthTokens): void => {
-  let cookies = decodeURIComponent(document.cookie).split('; ')
-  const indexOfTargetCookie = cookies.findIndex((cookie) => cookie.includes(`${COOKIE_NAME}=`))
-
-  let targetCookie = JSON.parse(cookies[indexOfTargetCookie].replace(`${COOKIE_NAME}=`, ''))
-  targetCookie.authenticated.token = tokens.accessToken.value
-  targetCookie.authenticated.refresh_token = tokens.refreshToken
-  const stringifiedTargetCookie = `${COOKIE_NAME}=`.concat(JSON.stringify(targetCookie))
-  cookies[indexOfTargetCookie] = stringifiedTargetCookie
-  const replacementCookie = cookies.join('; ')
-  document.cookie = encodeURIComponent(replacementCookie)
+  let cookie = getCookieAsObject()
+  cookie.authenticated.token = tokens.accessToken.value
+  cookie.authenticated.refresh_token = tokens.refreshToken
+  setCookie(COOKIE_NAME, JSON.stringify(cookie))
 }
 
 /**
@@ -112,27 +107,27 @@ export const applyAuthTokenInterceptor = (axios: AxiosInstance, config: IAuthTok
  * @returns {IAuthTokens} Object containing refresh token and access token
  */
 const getAuthTokens = (): IAuthTokens | undefined => {
-  const cookie = document.cookie.split(`; ${COOKIE_NAME}=`)
-  const encodedValue = cookie.pop()?.split(';').shift()
-
   let tokens = undefined
-  if (encodedValue) {
-    const decodedValue = decodeURIComponent(encodedValue)
-    try {
-      const parsedValue = JSON.parse(decodedValue)
-      const accessTokenValue = parsedValue.authenticated.value
-      const accessTokenExp = parsedValue.authenticated.tokenData.exp
-      const refreshToken = parsedValue.authenticated.refresh_token
-      tokens = { accessToken: { value: accessTokenValue, exp: accessTokenExp }, refreshToken }
-    } catch (error: unknown) {
-      if (error instanceof SyntaxError) {
-        error.message = `Failed to parse auth tokens: ${decodedValue}`
-        throw error
-      }
+  try {
+    const cookie = getCookieAsObject()
+    console.log('cookie: ', cookie)
+    const accessTokenValue = cookie.authenticated.token
+    const accessTokenExp = cookie.authenticated.tokenData.exp
+    const refreshToken = cookie.authenticated.refresh_token
+    tokens = { accessToken: { value: accessTokenValue, exp: accessTokenExp }, refreshToken }
+  } catch (error: unknown) {
+    if (error instanceof SyntaxError) {
+      error.message = 'Failed to parse auth tokens'
+      throw error
     }
   }
-
+  console.log('tokens: ', tokens)
   return tokens
+}
+
+const getCookieAsObject = () => {
+  const cookie = getCookie('ember_simple_auth-session') || '{"authenticated":{}}'
+  return JSON.parse(cookie)
 }
 
 /**
