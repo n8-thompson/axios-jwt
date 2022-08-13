@@ -31,7 +31,31 @@ export const isLoggedIn = (): boolean => {
  * Sets the access and refresh tokens
  * @param {IAuthTokens} tokens - Access and Refresh tokens
  */
-export const setAuthTokens = (tokens: IAuthTokens): void => localStorage.setItem(STORAGE_KEY, JSON.stringify(tokens))
+export const setAuthTokens = (tokens: IAuthTokens): void => {
+  const COOKIE_PREFIX = `${STORAGE_KEY}=`
+  const COOKIES_SEPARATOR = '; '
+
+  // Deconstruct cookies
+  const cookies = document.cookie.split(COOKIES_SEPARATOR)
+  const cookieIndex = cookies.findIndex((el) => el.includes(COOKIE_PREFIX))
+  const cookieContent = cookies[cookieIndex].replace(COOKIE_PREFIX, '')
+  const contentDecoded = decodeURIComponent(cookieContent)
+
+  // Modify target cookie
+  let newCookie
+  newCookie = JSON.parse(contentDecoded)
+  newCookie.authenticated.token = tokens.accessToken
+  newCookie.authenticated.refresh_token = tokens.refreshToken // I THINK THIS ISN'T NEEDED ?
+
+  // Reconstruct cookies
+  newCookie = JSON.stringify(newCookie)
+  newCookie = encodeURIComponent(newCookie)
+  newCookie = `${COOKIE_PREFIX}${newCookie}`
+  let newCookies
+  newCookies = [...cookies.slice(0, cookieIndex - 1), newCookie, ...cookies.slice(cookieIndex + 1)]
+  newCookies = newCookies.join(COOKIES_SEPARATOR)
+  document.cookie = newCookies
+}
 
 /**
  * Sets the access token
@@ -92,11 +116,10 @@ export const refreshTokenIfNeeded = async (requestRefresh: TokenRefreshRequest):
   // use access token (if we have it)
   let accessToken = getAccessToken()
   let expiration = getAccessTokenExpiration()
-  console.log('Access Token retrieved: ', accessToken)
 
-  let isExpired = isTokenExpired(Number(expiration))
-  console.log('isExpired: ', isExpired)
-  if (!accessToken || isExpired) {
+  let shouldRefresh = tokenIsExpiredOrIsAboutExpire(Number(expiration))
+  console.log('shouldRefresh: ', shouldRefresh)
+  if (accessToken && shouldRefresh) {
     accessToken = await refreshToken(requestRefresh)
   }
 
@@ -160,6 +183,12 @@ const isTokenExpired = (expiration: number): boolean => {
   return !expiresIn || expiresIn <= EXPIRE_FUDGE
 }
 
+const tokenIsExpiredOrIsAboutExpire = (expiration: number) => {
+  if (!expiration) return true
+  const timeRemaining = expiration - Date.now() / 1000
+  return timeRemaining <= 10
+}
+
 /**
  * Returns the number of seconds before the access token expires or -1 if it already has
  *
@@ -168,7 +197,7 @@ const isTokenExpired = (expiration: number): boolean => {
  */
 const getExpiresIn = (expiration: number): number => {
   if (!expiration) return -1
-  return expiration - Date.now()
+  return expiration - Date.now() / 1000
 }
 
 /**
