@@ -28,10 +28,10 @@ export const isLoggedIn = (): boolean => {
 }
 
 /**
- * Sets the access and refresh tokens
+ * Sets the access token
  * @param {IAuthTokens} tokens - Access and Refresh tokens
  */
-export const setAuthTokens = (tokens: IAuthTokens): void => {
+export const setAuthTokens = (accessToken: Token): void => {
   const COOKIE_PREFIX = `${STORAGE_KEY}=`
   const COOKIES_SEPARATOR = '; '
 
@@ -44,8 +44,7 @@ export const setAuthTokens = (tokens: IAuthTokens): void => {
   // Modify target cookie
   let newCookie
   newCookie = JSON.parse(contentDecoded)
-  newCookie.authenticated.token = tokens.accessToken
-  newCookie.authenticated.refresh_token = tokens.refreshToken // I THINK THIS ISN'T NEEDED ?
+  newCookie.authenticated.token = accessToken
 
   // Reconstruct cookies
   newCookie = JSON.stringify(newCookie)
@@ -67,14 +66,36 @@ export const setAccessToken = (token: Token): void => {
     throw new Error('Unable to update access token since there are not tokens currently stored')
   }
 
-  tokens.accessToken.value = token
-  setAuthTokens(tokens)
+  setAuthTokens(token)
 }
 
 /**
  * Clears both tokens
  */
-export const clearAuthTokens = (): void => localStorage.removeItem(STORAGE_KEY)
+export const clearAuthTokens = (): void => {
+  const COOKIE_PREFIX = `${STORAGE_KEY}=`
+  const COOKIES_SEPARATOR = '; '
+
+  // Deconstruct cookies
+  const cookies = document.cookie.split(COOKIES_SEPARATOR)
+  const cookieIndex = cookies.findIndex((el) => el.includes(COOKIE_PREFIX))
+  const cookieContent = cookies[cookieIndex].replace(COOKIE_PREFIX, '')
+  const contentDecoded = decodeURIComponent(cookieContent)
+
+  // Modify target cookie
+  let newCookie
+  newCookie = JSON.parse(contentDecoded)
+  newCookie.authenticated = {}
+
+  // Reconstruct cookies
+  newCookie = JSON.stringify(newCookie)
+  newCookie = encodeURIComponent(newCookie)
+  newCookie = `${COOKIE_PREFIX}${newCookie}`
+  let newCookies
+  newCookies = [...cookies.slice(0, cookieIndex - 1), newCookie, ...cookies.slice(cookieIndex + 1)]
+  newCookies = newCookies.join(COOKIES_SEPARATOR)
+  document.cookie = newCookies
+}
 
 /**
  * Returns the stored refresh token
