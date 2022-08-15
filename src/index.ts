@@ -21,58 +21,38 @@ export interface IAccessToken {
 // EXPORTS
 
 /**
- * Checks if cookie contains data
- * @returns Whether the user is logged in or not
- */
-export const isLoggedIn = (): boolean => {
-  const cookie = getCookieAsJSON()
-  if (cookie?.authenticated) {
-    return !!Object.keys(cookie.authenticated).length
-  } else {
-    return false
-  }
-}
-
-/**
- *  Returns the refresh and access tokens
- * @returns {IAuthTokens} Object containing refresh and access tokens
- */
-const getAuthTokens = (): IAuthTokens | undefined => {
-  console.log('getAuthTokens hit')
-
-  const cookie = getCookieAsJSON()
-  let tokens = undefined
-  const accessTokenValue = cookie.authenticated.token
-  const accessTokenExp = cookie.authenticated.tokenData.exp
-  const refreshToken = cookie.authenticated.refresh_token
-  tokens = { accessToken: { value: accessTokenValue, exp: accessTokenExp }, refreshToken }
-
-  return tokens
-}
-
-/**
  * Modifies the cookie to contain the updated token
  * @param {Token} accessToken - Access and Refresh tokens
  */
 export const setAccessToken = (accessToken: Token): void => {
-  const tokens = getAuthTokens()
-  if (!tokens) {
+  // const tokens = getAuthTokens()
+  const cookie = cookieData()
+
+  if (!cookie) {
     throw new Error('Unable to update access token since there are not tokens currently stored')
   }
 
-  let newCookie = getCookieAsJSON()
-  newCookie.authenticated.token = accessToken
+  let newCookie = cookieData()
+  // newCookie.value.authenticated.token = accessToken
   reconstructCookies(newCookie)
 }
 
-const getCookieAsJSON = () => {
-  const cookies = document.cookie.split(COOKIES_SEPARATOR)
-  const cookieIndex = cookies.findIndex((el) => el.includes(TARGET_COOKIE_PREFIX))
-  const cookieContent = cookies[cookieIndex].replace(TARGET_COOKIE_PREFIX, '')
-  const contentDecoded = decodeURIComponent(cookieContent)
-  const contentParsed = JSON.parse(contentDecoded)
+export const cookieData = () => {
+  let existsAndIsAuthenticated = false
+  let value = { authenticated: {} }
 
-  return contentParsed
+  try {
+    const cookies = document.cookie.split(COOKIES_SEPARATOR)
+    const cookieIndex = cookies.findIndex((el) => el.includes(TARGET_COOKIE_PREFIX))
+    const cookieContent = cookies[cookieIndex].replace(TARGET_COOKIE_PREFIX, '')
+    const contentDecoded = decodeURIComponent(cookieContent)
+    value = JSON.parse(contentDecoded)
+    existsAndIsAuthenticated = !!Object.keys(value.authenticated).length
+  } catch (e) {
+    return { existsAndIsAuthenticated, value }
+  }
+
+  return { existsAndIsAuthenticated, value, userId: value.authenticated.tokenData.user_id }
 }
 
 const reconstructCookies = (json: {}) => {
@@ -84,8 +64,8 @@ const reconstructCookies = (json: {}) => {
 }
 
 export const clearAuthTokens = (): void => {
-  let newCookie = getCookieAsJSON()
-  newCookie.authenticated = {}
+  let newCookie = cookieData()
+  newCookie.value.authenticated = {}
   reconstructCookies(newCookie)
 }
 
@@ -93,24 +73,24 @@ export const clearAuthTokens = (): void => {
  * Returns the stored refresh token
  * @returns {string} Refresh token
  */
-export const getRefreshToken = (): Token | undefined => {
-  const tokens = getAuthTokens()
-  return tokens ? tokens.refreshToken : undefined
-}
+// export const getRefreshToken = (): Token | undefined => {
+//   const tokens = getCookie()
+//   return tokens ? tokens.value.refreshToken : undefined
+// }
 
-/**
- * Returns the stored access token
- * @returns {string} Access token
- */
-export const getAccessToken = (): Token | undefined => {
-  const tokens = getAuthTokens()
-  return tokens ? tokens.accessToken.value : undefined
-}
+// /**
+//  * Returns the stored access token
+//  * @returns {string} Access token
+//  */
+// export const getAccessToken = (): Token | undefined => {
+//   const tokens = getAuthTokens()
+//   return tokens ? tokens.accessToken.value : undefined
+// }
 
-export const getAccessTokenExpiration = (): string | undefined => {
-  const tokens = getAuthTokens()
-  return tokens ? tokens.accessToken.exp : undefined
-}
+// export const getAccessTokenExpiration = (): string | undefined => {
+//   const tokens = getAuthTokens()
+//   return tokens ? tokens.accessToken.exp : undefined
+// }
 
 /**
  * @callback requestRefresh
@@ -125,8 +105,10 @@ export const getAccessTokenExpiration = (): string | undefined => {
  */
 export const refreshTokenIfNeeded = async (requestRefresh: TokenRefreshRequest): Promise<Token | undefined> => {
   // use access token (if we have it)
-  let accessToken = getAccessToken()
-  let expiration = getAccessTokenExpiration()
+  // let accessToken = getAccessToken()
+  // let expiration = getAccessTokenExpiration()
+  let accessToken = ''
+  let expiration = ''
 
   let shouldRefresh = tokenIsExpiredOrIsAboutExpire(Number(expiration))
   console.log('shouldRefresh: ', shouldRefresh)
@@ -190,7 +172,7 @@ const getExpiresIn = (expiration: number): number => {
  * @returns {string} - Fresh access token
  */
 const refreshToken = async (requestRefresh: TokenRefreshRequest): Promise<Token> => {
-  const refreshToken = getRefreshToken()
+  const refreshToken = ''
   if (!refreshToken) throw new Error('No refresh token available')
 
   try {
@@ -248,7 +230,8 @@ export const authTokenInterceptor = ({
   requestRefresh,
 }: IAuthTokenInterceptorConfig) => async (requestConfig: AxiosRequestConfig): Promise<AxiosRequestConfig> => {
   // We need refresh token to do any authenticated requests
-  if (!getRefreshToken()) return requestConfig
+  if (!'') return requestConfig
+  // if (!getRefreshToken()) return requestConfig
 
   // Queue the request if another refresh request is currently happening
   if (isRefreshing) {
