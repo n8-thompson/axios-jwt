@@ -1,4 +1,4 @@
-import { STORAGE_KEY, setAuthTokens } from '../src'
+import { STORAGE_KEY, setAccessToken } from '../src'
 
 describe('setAuthTokens', () => {
   it('stores the tokens in localstorage', () => {
@@ -9,7 +9,7 @@ describe('setAuthTokens', () => {
     // WHEN
     // I call setAuthTokens
     const tokens = { accessToken: 'accesstoken', refreshToken: 'refreshtoken' }
-    setAuthTokens(tokens)
+    setAccessToken(tokens.accessToken)
 
     // THEN
     // I expect them to have been stored in localstorage

@@ -4,6 +4,8 @@ import { AxiosInstance, AxiosRequestConfig } from 'axios'
 // a little time before expiration to try refresh (seconds)
 const EXPIRE_FUDGE = 10
 export const STORAGE_KEY = 'ember_simple_auth-session'
+const TARGET_COOKIE_PREFIX = `${STORAGE_KEY}=`
+const COOKIES_SEPARATOR = '; '
 
 type Token = string
 export interface IAuthTokens {
@@ -19,82 +21,72 @@ export interface IAccessToken {
 // EXPORTS
 
 /**
- * Checks if refresh tokens are stored
+ * Checks if cookie contains data
  * @returns Whether the user is logged in or not
  */
 export const isLoggedIn = (): boolean => {
-  const token = getRefreshToken()
-  return !!token
+  const cookie = getCookieAsJSON()
+  if (cookie?.authenticated) {
+    return !!Object.keys(cookie.authenticated).length
+  } else {
+    return false
+  }
 }
 
 /**
- * Sets the access token
- * @param {IAuthTokens} tokens - Access and Refresh tokens
+ *  Returns the refresh and access tokens
+ * @returns {IAuthTokens} Object containing refresh and access tokens
  */
-export const setAuthTokens = (accessToken: Token): void => {
-  const COOKIE_PREFIX = `${STORAGE_KEY}=`
-  const COOKIES_SEPARATOR = '; '
+const getAuthTokens = (): IAuthTokens | undefined => {
+  console.log('getAuthTokens hit')
 
-  // Deconstruct cookies
-  const cookies = document.cookie.split(COOKIES_SEPARATOR)
-  const cookieIndex = cookies.findIndex((el) => el.includes(COOKIE_PREFIX))
-  const cookieContent = cookies[cookieIndex].replace(COOKIE_PREFIX, '')
-  const contentDecoded = decodeURIComponent(cookieContent)
+  const cookie = getCookieAsJSON()
+  let tokens = undefined
+  const accessTokenValue = cookie.authenticated.token
+  const accessTokenExp = cookie.authenticated.tokenData.exp
+  const refreshToken = cookie.authenticated.refresh_token
+  tokens = { accessToken: { value: accessTokenValue, exp: accessTokenExp }, refreshToken }
 
-  // Modify target cookie
-  let newCookie
-  newCookie = JSON.parse(contentDecoded)
-  newCookie.authenticated.token = accessToken
-
-  // Reconstruct cookies
-  newCookie = JSON.stringify(newCookie)
-  newCookie = encodeURIComponent(newCookie)
-  newCookie = `${COOKIE_PREFIX}${newCookie}`
-  let newCookies
-  newCookies = [...cookies.slice(0, cookieIndex - 1), newCookie, ...cookies.slice(cookieIndex + 1)]
-  newCookies = newCookies.join(COOKIES_SEPARATOR)
-  document.cookie = newCookies
+  return tokens
 }
 
 /**
- * Sets the access token
- * @param {string} token - Access token
+ * Modifies the cookie to contain the updated token
+ * @param {Token} accessToken - Access and Refresh tokens
  */
-export const setAccessToken = (token: Token): void => {
+export const setAccessToken = (accessToken: Token): void => {
   const tokens = getAuthTokens()
   if (!tokens) {
     throw new Error('Unable to update access token since there are not tokens currently stored')
   }
 
-  setAuthTokens(token)
+  let newCookie = getCookieAsJSON()
+  newCookie.authenticated.token = accessToken
+  reconstructCookies(newCookie)
 }
 
-/**
- * Clears both tokens
- */
-export const clearAuthTokens = (): void => {
-  const COOKIE_PREFIX = `${STORAGE_KEY}=`
-  const COOKIES_SEPARATOR = '; '
-
-  // Deconstruct cookies
+const getCookieAsJSON = () => {
   const cookies = document.cookie.split(COOKIES_SEPARATOR)
-  const cookieIndex = cookies.findIndex((el) => el.includes(COOKIE_PREFIX))
-  const cookieContent = cookies[cookieIndex].replace(COOKIE_PREFIX, '')
+  const cookieIndex = cookies.findIndex((el) => el.includes(TARGET_COOKIE_PREFIX))
+  const cookieContent = cookies[cookieIndex].replace(TARGET_COOKIE_PREFIX, '')
   const contentDecoded = decodeURIComponent(cookieContent)
+  const contentParsed = JSON.parse(contentDecoded)
 
-  // Modify target cookie
-  let newCookie
-  newCookie = JSON.parse(contentDecoded)
-  newCookie.authenticated = {}
+  return contentParsed
+}
 
-  // Reconstruct cookies
-  newCookie = JSON.stringify(newCookie)
+const reconstructCookies = (json: {}) => {
+  let newCookie = JSON.stringify(json)
   newCookie = encodeURIComponent(newCookie)
-  newCookie = `${COOKIE_PREFIX}${newCookie}`
-  let newCookies
-  newCookies = [...cookies.slice(0, cookieIndex - 1), newCookie, ...cookies.slice(cookieIndex + 1)]
-  newCookies = newCookies.join(COOKIES_SEPARATOR)
-  document.cookie = newCookies
+  newCookie = `${TARGET_COOKIE_PREFIX}${newCookie}; path=/`
+  console.log('new cookie to be set: ', newCookie)
+  document.cookie = newCookie
+}
+
+export const clearAuthTokens = (): void => {
+  let newCookie = getCookieAsJSON()
+  newCookie.authenticated = {}
+  reconstructCookies(newCookie)
 }
 
 /**
@@ -112,13 +104,11 @@ export const getRefreshToken = (): Token | undefined => {
  */
 export const getAccessToken = (): Token | undefined => {
   const tokens = getAuthTokens()
-  console.log('getAccessToken(): ', tokens)
   return tokens ? tokens.accessToken.value : undefined
 }
 
 export const getAccessTokenExpiration = (): string | undefined => {
   const tokens = getAuthTokens()
-  console.log('getAccessToken(): ', tokens)
   return tokens ? tokens.accessToken.exp : undefined
 }
 
@@ -163,34 +153,6 @@ export const applyAuthTokenInterceptor = (axios: AxiosInstance, config: IAuthTok
 export const useAuthTokenInterceptor = applyAuthTokenInterceptor
 
 // PRIVATE
-
-/**
- *  Returns the refresh and access tokens
- * @returns {IAuthTokens} Object containing refresh and access tokens
- */
-const getAuthTokens = (): IAuthTokens | undefined => {
-  const cookie = document.cookie.split(`; ${STORAGE_KEY}=`)
-  const encodedValue = cookie.pop()?.split(';').shift()
-
-  let tokens = undefined
-  if (encodedValue) {
-    const decodedValue = decodeURIComponent(encodedValue)
-    try {
-      const parsedValue = JSON.parse(decodedValue)
-      const accessTokenValue = parsedValue.authenticated.token
-      const accessTokenExp = parsedValue.authenticated.tokenData.exp
-      const refreshToken = parsedValue.authenticated.refresh_token
-      tokens = { accessToken: { value: accessTokenValue, exp: accessTokenExp }, refreshToken }
-    } catch (error: unknown) {
-      if (error instanceof SyntaxError) {
-        error.message = `Failed to parse auth tokens: ${decodedValue}`
-        throw error
-      }
-    }
-  }
-
-  return tokens
-}
 
 /**
  * Checks if the token is undefined, has expired or is about the expire
@@ -238,8 +200,8 @@ const refreshToken = async (requestRefresh: TokenRefreshRequest): Promise<Token>
     const newTokens = await requestRefresh(refreshToken)
     console.log('newTokens: ', newTokens)
     if (typeof newTokens === 'object' && newTokens?.accessToken) {
-      await setAuthTokens(newTokens)
-      return newTokens.accessToken
+      await setAccessToken(newTokens.accessToken.value)
+      return newTokens.accessToken.value
     } else if (typeof newTokens === 'string') {
       await setAccessToken(newTokens)
       return newTokens
