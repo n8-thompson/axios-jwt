@@ -118,7 +118,6 @@ const unauthenticate = (): void => {
 const getCurrentOrRefreshedAccessToken = async (
   requestRefresh: TokenRefreshRequest
 ): Promise<Token | undefined> => {
-  console.log('getCurrentOrRefreshedAccessToken hit');
   let cookie = module.cookieData();
   if (!cookie) return undefined;
 
@@ -138,7 +137,6 @@ const applyAuthTokenInterceptor = (
   axios: AxiosInstance,
   config: IAuthTokenInterceptorConfig
 ): void => {
-  console.log('applyAuthTokenInterceptor hit');
   if (!axios.interceptors) throw new Error(`invalid axios instance: ${axios}`);
   axios.interceptors.request.use(authTokenInterceptor(config));
 };
@@ -148,7 +146,6 @@ const applyAuthTokenInterceptor = (
  * @param {IOriginalCookieStructure} cookieObject - the new cookie as an object
  */
 const reconstructCookies = (cookieObject: IOriginalCookieStructure): void => {
-  console.log('real reconstructCookies hit');
   let newCookie = JSON.stringify(cookieObject);
   newCookie = encodeURIComponent(newCookie);
   newCookie = `${TARGET_COOKIE_PREFIX}${newCookie}; path=/`;
@@ -170,7 +167,6 @@ const authTokenInterceptor = ({
 }: IAuthTokenInterceptorConfig) => async (
   requestConfig: AxiosRequestConfig
 ): Promise<AxiosRequestConfig> => {
-  console.log('authTokenInterceptor hit');
   let cookie = cookieData();
   if (!!cookie?.refreshToken === false) return requestConfig;
 
