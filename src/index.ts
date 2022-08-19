@@ -1,12 +1,12 @@
 import { AxiosInstance, AxiosRequestConfig } from 'axios';
-
+import * as module from './index';
 export const STORAGE_KEY = 'ember_simple_auth-session';
 const TARGET_COOKIE_PREFIX = `${STORAGE_KEY}=`;
 const COOKIES_SEPARATOR = '; ';
 
 type Token = string;
 
-interface ICustomCookieStructure {
+export interface ICustomCookieStructure {
   original: IOriginalCookieStructure;
   userId: number;
   expiration: number;
@@ -14,19 +14,19 @@ interface ICustomCookieStructure {
   refreshToken: string;
 }
 
-interface IOriginalCookieStructure {
+export interface IOriginalCookieStructure {
   authenticated: IAuthenticated;
 }
 
 interface IAuthenticated {
   authenticator?: string;
-  exp?: string;
+  exp?: number;
   token?: string;
-  refreshToken?: string;
+  refresh_token?: string;
   tokenData?: {
     company_week_type?: string;
     default_schedule?: string;
-    exp: string;
+    exp: number;
     is_pet_parent: boolean;
     typ: string;
     user_email: string;
@@ -41,35 +41,32 @@ interface IAuthTokenInterceptorConfig {
   requestRefresh: TokenRefreshRequest;
 }
 
-// **** EXPORTS ****
-
 /**
  * Modifies the cookie to contain the updated token
  * @param {Token} accessToken - access token to replace existing access token
  * @param {IOriginalCookieStructure} originalCookieData - copy of the original cookie data
  */
-export const setAccessToken = (
+const setAccessToken = (
   accessToken: Token,
   originalCookieData: IOriginalCookieStructure
 ): void => {
-  console.log('setAccessToken hit');
   let newCookie = {} as IOriginalCookieStructure;
   newCookie = originalCookieData;
   newCookie.authenticated.token = accessToken;
-  reconstructCookies(newCookie);
+  module.reconstructCookies(newCookie);
 };
 
 /**
  * Gets the ember_simple_auth-session cookie and returns it's data if it exists
  * @returns {ICustomCookieStructure} Object representing the cookie
  */
-export const cookieData = (): ICustomCookieStructure | undefined => {
-  console.log('cookieData hit');
+const cookieData = (): ICustomCookieStructure | undefined => {
   try {
     const cookies = document.cookie.split(COOKIES_SEPARATOR);
     const cookieIndex = cookies.findIndex((el) =>
       el.includes(TARGET_COOKIE_PREFIX)
     );
+    if (cookieIndex === -1) return undefined;
     const cookieContent = cookies[cookieIndex].replace(
       TARGET_COOKIE_PREFIX,
       ''
@@ -97,17 +94,14 @@ export const cookieData = (): ICustomCookieStructure | undefined => {
 /**
  * Clears the cookie data by overwriting with {authorized: {}}
  */
-export const unauthenticate = (): void => {
-  console.log('unauthenticate hit');
-  let cookie = cookieData();
+const unauthenticate = (): void => {
+  let cookie = module.cookieData();
   if (!cookie)
-    throw new Error(
-      'Unable to update access token since there are not tokens currently stored'
-    );
+    throw new Error('Unable to unauthenticate becuase there is no cookie');
   let newCookie = {} as IOriginalCookieStructure;
   newCookie = cookie.original;
   newCookie.authenticated = {};
-  reconstructCookies(newCookie);
+  module.reconstructCookies(newCookie);
 };
 
 /**
@@ -121,17 +115,17 @@ export const unauthenticate = (): void => {
  * @param {TokenRefreshRequest} requestRefresh - Function that is used to get a new access token
  * @returns {string} Access token
  */
-export const getCurrentOrRefreshedAccessToken = async (
+const getCurrentOrRefreshedAccessToken = async (
   requestRefresh: TokenRefreshRequest
 ): Promise<Token | undefined> => {
   console.log('getCurrentOrRefreshedAccessToken hit');
-  let cookie = cookieData();
+  let cookie = module.cookieData();
   if (!cookie) return undefined;
 
   const { expiration, accessToken } = cookie;
   let token = accessToken;
-  let shouldRefresh = tokenIsExpiredOrIsAboutExpire(Number(expiration));
-  if (shouldRefresh) token = await refreshToken(requestRefresh);
+  let shouldRefresh = module.tokenIsExpiredOrIsAboutToExpire(expiration);
+  if (shouldRefresh) token = await module.refreshToken(requestRefresh);
   return token;
 };
 
@@ -140,7 +134,7 @@ export const getCurrentOrRefreshedAccessToken = async (
  * @param {Axios} axios - Axios instance to apply the interceptor to
  * @param {IAuthTokenInterceptorConfig} config - Configuration for the interceptor
  */
-export const applyAuthTokenInterceptor = (
+const applyAuthTokenInterceptor = (
   axios: AxiosInstance,
   config: IAuthTokenInterceptorConfig
 ): void => {
@@ -154,7 +148,7 @@ export const applyAuthTokenInterceptor = (
  * @param {IOriginalCookieStructure} cookieObject - the new cookie as an object
  */
 const reconstructCookies = (cookieObject: IOriginalCookieStructure): void => {
-  console.log('reconstructCookies hit');
+  console.log('real reconstructCookies hit');
   let newCookie = JSON.stringify(cookieObject);
   newCookie = encodeURIComponent(newCookie);
   newCookie = `${TARGET_COOKIE_PREFIX}${newCookie}; path=/`;
@@ -170,7 +164,7 @@ const reconstructCookies = (cookieObject: IOriginalCookieStructure): void => {
  * @param {IAuthTokenInterceptorConfig} config - Configuration for the interceptor
  * @returns {Promise} Promise that resolves in the supplied requestConfig
  */
-export const authTokenInterceptor = ({
+const authTokenInterceptor = ({
   header = 'Authorization',
   requestRefresh
 }: IAuthTokenInterceptorConfig) => async (
@@ -213,11 +207,12 @@ export const authTokenInterceptor = ({
   return requestConfig;
 };
 
-// **** PRIVATE ****
-
-const tokenIsExpiredOrIsAboutExpire = (expiration: number) => {
-  console.log('tokenIsExpiredOrIsAboutExpire hit');
-  if (!expiration) return true;
+/**
+ * Determines if expiration has occured or not
+ * @param {number} expiration - The expiration of the token
+ * @returns {boolean} - If it is expired or not
+ */
+const tokenIsExpiredOrIsAboutToExpire = (expiration: number) => {
   const timeRemaining = expiration - Date.now() / 1000;
   return timeRemaining <= 10;
 };
@@ -283,4 +278,16 @@ const declineQueue = (error: Error) => {
   });
 
   queue = [];
+};
+
+export {
+  refreshToken,
+  tokenIsExpiredOrIsAboutToExpire, //tested
+  authTokenInterceptor,
+  reconstructCookies, //tested
+  applyAuthTokenInterceptor, //tested
+  getCurrentOrRefreshedAccessToken,
+  unauthenticate, //tested
+  cookieData, //tested
+  setAccessToken //tested
 };

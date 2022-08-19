@@ -33,7 +33,8 @@
   "scripts": {
     "build": "tsc",
     "start": "tsc -w",
-    "test": "jest",
+    "test": "jest --watch",
+    "test:ci": "jest --wacth --ci",
     "prepack": "tsc"
   },
   "keywords": [
